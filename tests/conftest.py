@@ -30,7 +30,7 @@ engine = create_async_engine(
     connect_args={"check_same_thread": False},
 )
 
-`@pytest_asyncio.fixture`
+@pytest_asyncio.fixture
 async def db_session():
     """Creates a fresh in-memory database for every single test."""
     async with engine.begin() as conn:
