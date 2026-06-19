@@ -49,5 +49,7 @@ def verify_totp_code(secret: str, input_code: str) -> bool:
     Validates the 6-digit code provided by the user.
     The 'valid_window=1' allows for a slight time drift between phones and servers.
     """
+    if not secret:
+        return False
     totp = pyotp.TOTP(secret)
     return totp.verify(input_code, valid_window=1)
