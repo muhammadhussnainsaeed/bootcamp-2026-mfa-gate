@@ -15,8 +15,14 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(username: str, phone: str, db: AsyncSession = Depends(get_session)):
-    user = await auth_service.create_new_user(db, username, phone)
-    return {"message": "User created", "user_id": user.id}
+    try:
+        user = await auth_service.create_new_user(db, username, phone)
+        return {"message": "User created", "user_id": user.id}
+    except IntegrityError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username or phone number already registered"
+        )
 
 @router.post("/login")
 async def login(
