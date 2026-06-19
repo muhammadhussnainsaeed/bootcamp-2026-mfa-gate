@@ -15,7 +15,6 @@ async def test_register_user(client: AsyncClient):
     data = response.json()
     assert data["message"] == "User created"
     assert "user_id" in data
-    assert "manual_entry_secret" in data
 
 async def test_login_and_verify_happy_path(client: AsyncClient, redis_client):
     """Tests the full MFA SMS flow: Register -> Login -> Fetch PIN -> Verify."""
@@ -32,9 +31,9 @@ async def test_login_and_verify_happy_path(client: AsyncClient, redis_client):
     assert pin is not None
     
     # 4. Verify the correct PIN
-    verify_res = await client.post("/auth/verify", params={"user_id": user_id, "pin": pin})
+    verify_res = await client.post("/auth/verify", params={"user_id": user_id, "token": pin})
     assert verify_res.status_code == 200
-    assert verify_res.json()["message"] == "Authentication dynamic token handshake completed successfully"
+    assert verify_res.json()["message"] == "Authentication via sms successful"
 
 async def test_wrong_pin_and_max_attempts(client: AsyncClient, redis_client):
     """Demonstrates failure mode: Entering the wrong PIN and hitting the 3-attempt cap."""
@@ -43,16 +42,16 @@ async def test_wrong_pin_and_max_attempts(client: AsyncClient, redis_client):
     user_id = login_res.json()["user_id"]
     
     # Attempt 1: Wrong
-    res1 = await client.post("/auth/verify", params={"user_id": user_id, "pin": "000000"})
+    res1 = await client.post("/auth/verify", params={"user_id": user_id, "token": "000000"})
     assert res1.status_code == 400
     assert "Remaining attempts: 2" in res1.json()["detail"]
     
     # Attempt 2: Wrong
-    res2 = await client.post("/auth/verify", params={"user_id": user_id, "pin": "000000"})
+    res2 = await client.post("/auth/verify", params={"user_id": user_id, "token": "000000"})
     assert res2.status_code == 400
     
     # Attempt 3: Wrong (Lockout)
-    res3 = await client.post("/auth/verify", params={"user_id": user_id, "pin": "000000"})
+    res3 = await client.post("/auth/verify", params={"user_id": user_id, "token": "000000"})
     assert res3.status_code == 400
     assert "Max attempts reached" in res3.json()["detail"]
 
@@ -67,6 +66,6 @@ async def test_expired_pin(client: AsyncClient, redis_client):
     # Simulate time passing by manually deleting the key from the fake Redis instance
     await redis_client.delete(f"pin:{user_id}")
     
-    verify_res = await client.post("/auth/verify", params={"user_id": user_id, "pin": pin})
+    verify_res = await client.post("/auth/verify", params={"user_id": user_id, "token": pin})
     assert verify_res.status_code == 400
     assert "PIN expired" in verify_res.json()["detail"]

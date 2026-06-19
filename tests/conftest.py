@@ -1,3 +1,4 @@
+import os
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -5,6 +6,9 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 import fakeredis.aioredis
+
+# Ensure app import doesn't fail when DATABASE_URL is unset in CI/local test runs.
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 # Import your FastAPI app and dependencies
 from src.main import app

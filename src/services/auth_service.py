@@ -49,4 +49,6 @@ async def verify_pin(redis_client: redis.Redis, user_id: int, input_pin: str) ->
 
     # Mis-match: Increment attempts atomically
     await redis_client.incr(attempt_key)
+    if attempts >= 2:
+        return False, "Max attempts reached. Request a new PIN."
     return False, f"Invalid PIN. Remaining attempts: {2 - attempts}"

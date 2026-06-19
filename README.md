@@ -36,7 +36,7 @@ uvicorn src.main:app --reload
 - **Entry point:**: `src/main.py` is the application's primary entrypoint and will start any HTTP server or CLI used by the project.
 - **Environment variables:**: Database and Redis connection details are provided via environment variables (not hard-coded). If running locally without Docker, ensure those services are reachable or mocked for tests.
 - **Python version:**: The project targets Python 3.10+ features (type hints, modern stdlib conveniences).
-- **Testing:**: Tests live in the `tests/` folder and assume a test-friendly configuration; see `tests/pytest_configuration.py` for test setup.
+- **Testing:**: Tests live in the `tests/` folder and assume a test-friendly configuration; see `tests/conftest.py` for test setup.
 
 ---
 
