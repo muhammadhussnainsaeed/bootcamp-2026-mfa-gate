@@ -71,7 +71,12 @@ async def verify(user_id: int, token: str, token_type: Literal["sms", "totp"] = 
     return {"message": f"Authentication via {token_type} successful"}
 
 @router.get("/qr-code/{username}")
-async def get_qr(username: str, secret: str):
-    uri = totp_service.get_totp_uri(username, secret)
+async def get_qr(username: str, db: AsyncSession = Depends(get_session)):
+    stmt = select(User).where(User.username == username)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+    if not user or not user.totp_secret:
+        raise HTTPException(status_code=404, detail="User not found or TOTP not configured")
+    uri = totp_service.get_totp_uri(username, user.totp_secret)
     qr_base64 = totp_service.generate_qr_code_base64(uri)
     return {"qr_image": qr_base64}
