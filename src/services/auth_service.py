@@ -43,12 +43,11 @@ async def verify_pin(redis_client: redis.Redis, user_id: int, input_pin: str) ->
 
     if stored_pin == input_pin:
         # Success: Clean up keys immediately
-        print("-----KEY MATCH:", stored_pin, input_pin)
         await redis_client.delete(pin_key, attempt_key)
         return True, "Success"
 
     # Mis-match: Increment attempts atomically
-    await redis_client.incr(attempt_key)
-    if attempts >= 2:
+    new_attempts = await redis_client.incr(attempt_key)
+    if new_attempts >= 3:
         return False, "Max attempts reached. Request a new PIN."
-    return False, f"Invalid PIN. Remaining attempts: {2 - attempts}"
+    return False, f"Invalid PIN. Remaining attempts: {3 - new_attempts}"

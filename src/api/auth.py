@@ -37,10 +37,7 @@ async def login(
         )
 
     # 3. Generate and store the PIN in Redis using the internal user.id
-    pin = await auth_service.generate_and_store_pin(redis_client, user.id)
-
-    # 4. Dispatch the mock SMS using the user's actual registered phone number
-    print(f"📡 [MOCK SMS OUTBOUND] To {user.phone_number} (User #{user.id}) -> Security Code: {pin}")
+    await auth_service.generate_and_store_pin(redis_client, user.id)
 
     # We return the user_id here so the frontend knows which ID to send to the /verify endpoint next
     return {
@@ -50,12 +47,12 @@ async def login(
 
 @router.post("/verify")
 async def verify(user_id: int, token: str, token_type: Literal["sms", "totp"] = "sms",
-        db: AsyncSession = Depends(get_session) , redis_client: redis.Redis = Depends(get_redis_client)):
+        db: AsyncSession = Depends(get_session), redis_client: redis.Redis = Depends(get_redis_client)):
     if token_type == "sms":
         # Check Redis
         is_valid, message = await auth_service.verify_pin(redis_client, user_id, token)
         if not is_valid:
-            raise HTTPException(status_code=400, detail= message)
+            raise HTTPException(status_code=400, detail=message)
 
     elif token_type == "totp":
         # Check Database secret
@@ -72,5 +69,3 @@ async def get_qr(username: str, secret: str):
     uri = totp_service.get_totp_uri(username, secret)
     qr_base64 = totp_service.generate_qr_code_base64(uri)
     return {"qr_image": qr_base64}
-
-
