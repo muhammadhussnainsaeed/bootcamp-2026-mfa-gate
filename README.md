@@ -38,9 +38,3 @@ uvicorn src.main:app --reload
 - **Python version:**: The project targets Python 3.10+ features (type hints, modern stdlib conveniences).
 - **Testing:**: Tests live in the `tests/` folder and assume a test-friendly configuration; see `tests/conftest.py` for test setup.
 
----
-
-If you want, I can also:
-- add a short `Contributing` section,
-- include example environment variable names and sample `.env` file,
-- or run the test suite and report results.
