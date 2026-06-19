@@ -18,10 +18,19 @@ from src.models.user import User  # Needed so SQLModel knows about your tables
 
 # 1. Setup an in-memory SQLite database for blazing-fast isolated tests
 # We use aiosqlite as the async driver for SQLite
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.pool import StaticPool
+...
 SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
-engine = create_async_engine(SQLALCHEMY_DATABASE_URL, echo=False, future=True)
+engine = create_async_engine(
+    SQLALCHEMY_DATABASE_URL,
+    echo=False,
+    future=True,
+    poolclass=StaticPool,
+    connect_args={"check_same_thread": False},
+)
 
-@pytest_asyncio.fixture
+`@pytest_asyncio.fixture`
 async def db_session():
     """Creates a fresh in-memory database for every single test."""
     async with engine.begin() as conn:
