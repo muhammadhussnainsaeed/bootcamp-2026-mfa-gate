@@ -19,6 +19,7 @@ async def generate_and_store_pin(redis_client: redis.Redis, user_id: int) -> str
     # Generate cryptographically secure 6-digit PIN
     pin = f"{secrets.randbelow(900000) + 100000}"
 
+    print(f"--PIN for {user_id}: {pin}")
     # Store PIN (5 mins Time to Live) and reset attempt counter simultaneously
     async with redis_client.pipeline(transaction=True) as pipe:
         await pipe.setex(f"pin:{user_id}", 300, pin)

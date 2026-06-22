@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 import redis.asyncio as redis
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 

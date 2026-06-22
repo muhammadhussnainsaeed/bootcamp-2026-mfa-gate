@@ -4,12 +4,12 @@ import io
 import base64
 
 
-def generate_totp_secret() -> str:
-    """
-    Generates a secure, random 32-character Base32 secret.
-    This secret is what the user stores in their Google Authenticator app.
-    """
-    return pyotp.random_base32()
+# def generate_totp_secret() -> str:
+#     """
+#     Generates a secure, random 32-character Base32 secret.
+#     This secret is what the user stores in their Google Authenticator app.
+#     """
+#     return pyotp.random_base32()
 
 
 def get_totp_uri(username: str, secret: str) -> str:
