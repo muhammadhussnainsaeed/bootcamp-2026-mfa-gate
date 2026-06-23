@@ -3,7 +3,7 @@ import pyotp
 import redis.asyncio as redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.user import User
-from src.core.redis import get_redis_client
+import logging
 
 
 async def create_new_user(db: AsyncSession, username: str, phone: str) -> User:
