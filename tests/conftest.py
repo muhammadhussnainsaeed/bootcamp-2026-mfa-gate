@@ -9,7 +9,7 @@ import fakeredis.aioredis
 
 # Ensure app import doesn't fail when DATABASE_URL is unset in CI/local test runs.
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
-
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 # Import your FastAPI app and dependencies
 from src.main import app
 from src.core.database import get_session
