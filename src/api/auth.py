@@ -44,7 +44,10 @@ async def login(
         )
 
     # 3. Generate and store the PIN in Redis using the internal user.id
-    await auth_service.generate_and_store_pin(redis_client, user.id)
+    ok, result = await auth_service.generate_and_store_pin(redis_client, user.id)
+
+    if not ok:
+        raise HTTPException(status_code=503, detail=result)
 
     # We return the user_id here so the frontend knows which ID to send to the /verify endpoint next
     return {
