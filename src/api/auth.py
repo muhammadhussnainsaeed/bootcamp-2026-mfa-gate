@@ -15,7 +15,7 @@ from src.core.database import get_session
 from src.core.redis import get_redis_client
 from src.services import auth_service
 from src.models.user import User
-from src.schemas.auth_schemas import LoginRequest
+from src.schemas.auth_schemas import LoginRequest, VerifyRequest
 from src.temporal.client import get_temporal_client, get_workflow_handle, get_workflow_reason
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -79,13 +79,17 @@ async def login(
 
     # 6. Start the Temporal Watcher
     workflow_id = f"mfa-watcher-{user.id}"
-    await temporal_client.start_workflow(
-        MFAEscalationWatcher.run,
-        args=[user.id],
-        id=workflow_id,
-        task_queue="mfa-watcher-queue",
-        id_reuse_policy=WorkflowIDReusePolicy.TERMINATE_IF_RUNNING,
-    )
+    try:
+        await temporal_client.start_workflow(
+                MFAEscalationWatcher.run,
+                args=[user.id],
+                id=workflow_id,
+                task_queue="mfa-watcher-queue",
+                id_reuse_policy=WorkflowIDReusePolicy.TERMINATE_IF_RUNNING,
+        )
+    except Exception:
+        await redis_client.delete(f"pin:{user.id}", f"attempts:{user.id}", f"cooldown:{user.id}")
+        raise HTTPException(status_code=503, detail="MFA escalation service unavailable")
 
     return {
         "message": "Verification token sent to registered device",
@@ -94,19 +98,19 @@ async def login(
 
 
 @router.post("/verify")
-async def verify(
-        user_id: int,
-        token: str,
+async def verify(user_data: VerifyRequest,
         token_type: Literal["sms", "totp"] = "sms",
         db: AsyncSession = Depends(get_session),
         redis_client: redis.Redis = Depends(get_redis_client),
         temporal_client: Client = Depends(get_temporal_client),
 ):
-    handle = get_workflow_handle(temporal_client, user_id)
+    handle = get_workflow_handle(temporal_client, user_data.user_id)
 
     if token_type == "sms":
-        is_valid, message = await auth_service.verify_pin(redis_client, user_id, token)
+        is_valid, message = await auth_service.verify_pin(redis_client, user_data.user_id, user_data.token)
         if not is_valid:
+            if "Service temporarily unavailable" in message:
+                raise HTTPException(status_code=503, detail=message)
             if "Max attempts reached" in message:
                 try:
                     await handle.signal(MFAEscalationWatcher.mark_as_failed)
@@ -114,22 +118,22 @@ async def verify(
                     print(f"Warning: Could not signal failure to Temporal. {e}")
 
                 # Immediate lock — don't wait on the activity round trip.
-                await redis_client.setex(f"locked:{user_id}", 600, "max_attempts")
+                await redis_client.setex(f"locked:{user_data.user_id}", 600, "max_attempts")
                 raise HTTPException(status_code=400, detail=message)
 
             raise HTTPException(status_code=400, detail=message)
 
     elif token_type == "totp":
-        user = await db.execute(select(User).where(User.id == user_id))
+        user = await db.execute(select(User).where(User.id == user_data.user_id))
         user_obj = user.scalar_one_or_none()
 
-        if not user_obj or not totp_service.verify_totp_code(user_obj.totp_secret, token):
+        if not user_obj or not totp_service.verify_totp_code(user_obj.totp_secret, user_data.token):
             raise HTTPException(status_code=400, detail="Invalid TOTP code")
 
     try:
         await handle.signal(MFAEscalationWatcher.mark_as_verified)
     except Exception as e:
-        print(f"CRITICAL: Could not signal Temporal workflow for user {user_id}. {e}")
+        print(f"CRITICAL: Could not signal Temporal workflow for user {user_data.user_id}. {e}")
         return {
             "message": f"Authentication via {token_type} accepted, but could not confirm "
                        f"workflow cleanup — treat as unverified until confirmed.",

@@ -9,7 +9,11 @@ from src.core.database import init_db
 async def lifespan(app: FastAPI):
     print("🚀 [STARTUP] Booting server and configuring database schemas...")
     await init_db()
-    app.state.temporal_client = await Client.connect("localhost:7233")
+    try:
+        app.state.temporal_client = await Client.connect("localhost:7233")
+    except Exception as e:
+        print(f"❌ [STARTUP] Failed to connect to Temporal: {e}")
+        raise
     yield
     print("🛑 [SHUTDOWN] Cleaning application network pools cleanly...")
 

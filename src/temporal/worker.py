@@ -4,7 +4,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 from src.temporal.activities import lock_account_activity, init_activity_dependencies
 from src.temporal.workflows import MFAEscalationWatcher
-from src.core.redis import REDIS_URL  # adjust to wherever your redis URL constant lives
+from src.core.redis import REDIS_URL
 
 
 async def main():
