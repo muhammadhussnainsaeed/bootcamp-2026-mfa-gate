@@ -64,7 +64,9 @@ async def verify_pin(redis_client: redis.Redis, user_id: int, input_pin: str) ->
         return False, "Max attempts reached. Request a new PIN."
     return False, f"Invalid PIN. Remaining attempts: {remaining}"
 
-async def verify_internal_api_key(x_internal_api_key: str):
+
+async def verify_internal_api_key(x_internal_api_key: str = Header(...)):
     expected = os.getenv("UNLOCK_KEY")
-    if not expected or x_internal_api_key != expected:
+    # Use secrets.compare_digest for constant-time comparison
+    if not expected or not secrets.compare_digest(x_internal_api_key, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")

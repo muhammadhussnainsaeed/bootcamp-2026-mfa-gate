@@ -1,4 +1,4 @@
-name: CI Pipeline
+name: CI/CD Pipeline
 
 on:
   push:
@@ -31,5 +31,31 @@ jobs:
 
       - name: Run Pytest
         run: |
-          # Run tests with short traceback, disable warnings, and output a concise report
-          pytest --tb=short --disable-warnings -v
+          python -m pytest --tb=short --disable-warnings -v
+
+  delivery:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate package and compose config
+        run: |
+          python -m compileall src tests
+          docker compose config

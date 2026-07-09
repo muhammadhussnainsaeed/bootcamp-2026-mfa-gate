@@ -172,6 +172,7 @@ async def unlock_account(
         f"locked:{user_id}",
         f"pin:{user_id}",
         f"attempts:{user_id}",
+        f"cooldown:{user_id}",
     )
 
     if not was_locked:

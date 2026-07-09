@@ -17,8 +17,12 @@ async def get_workflow_reason(handle: WorkflowHandle) -> str:
     """After signalling, pull the workflow's actual completion reason
     instead of guessing at what happened."""
     try:
-        result = await asyncio.wait_for(handle.result(), timeout=5)
+        # Increased to 15s to safely outlast the 10s activity timeout
+        result = await asyncio.wait_for(handle.result(), timeout=15.0)
         return result
+    except asyncio.TimeoutError:
+        print("WARNING: Timeout waiting for workflow result. Activity may still be running.")
+        return "pending_timeout"
     except Exception as e:
         print(f"WARNING: could not fetch workflow result: {e}")
         return "unknown"
