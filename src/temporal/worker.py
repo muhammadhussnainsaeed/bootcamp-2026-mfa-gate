@@ -8,6 +8,11 @@ from src.core.redis import REDIS_URL  # adjust to wherever your redis URL consta
 
 
 async def main():
+    """
+    Start the Temporal worker for MFA escalation monitoring.
+    
+    Connects to the local Temporal server, initializes Redis-backed activity dependencies, and runs a worker on the `mfa-watcher-queue` task queue with the MFA escalation workflow and account-locking activity registered.
+    """
     client = await Client.connect("localhost:7233")
 
     redis_client = redis.from_url(REDIS_URL, decode_responses=True)

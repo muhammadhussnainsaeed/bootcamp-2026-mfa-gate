@@ -9,6 +9,16 @@ from src.models.user import User
 
 
 async def create_new_user(db: AsyncSession, username: str, phone: str) -> User:
+    """
+    Create and persist a new user with a generated TOTP secret.
+    
+    Parameters:
+    	username (str): The user's username.
+    	phone (str): The user's phone number.
+    
+    Returns:
+    	User: The persisted user record.
+    """
     secret = pyotp.random_base32()
     user = User(username=username, phone_number=phone, totp_secret=secret)
     db.add(user)
@@ -18,6 +28,12 @@ async def create_new_user(db: AsyncSession, username: str, phone: str) -> User:
 
 
 async def generate_and_store_pin(redis_client: redis.Redis, user_id: int) -> tuple[bool, str]:
+    """
+    Generate and store a one-time PIN for a user.
+    
+    Returns:
+    	result (tuple[bool, str]): `(True, pin)` when the PIN is stored successfully, or `(False, "Service temporarily unavailable. Please try again shortly.")` if Redis is unavailable.
+    """
     pin = f"{secrets.randbelow(900000) + 100000}"
 
     try:
@@ -33,6 +49,16 @@ async def generate_and_store_pin(redis_client: redis.Redis, user_id: int) -> tup
 
 
 async def verify_pin(redis_client: redis.Redis, user_id: int, input_pin: str) -> tuple[bool, str]:
+    """
+    Verify a PIN stored for a user and track remaining attempts.
+    
+    Parameters:
+        user_id (int): The user identifier used to build the Redis keys.
+        input_pin (str): The PIN value to compare against the stored value.
+    
+    Returns:
+        tuple[bool, str]: A success flag and a status message.
+    """
     pin_key = f"pin:{user_id}"
     attempt_key = f"attempts:{user_id}"
 
@@ -65,6 +91,12 @@ async def verify_pin(redis_client: redis.Redis, user_id: int, input_pin: str) ->
     return False, f"Invalid PIN. Remaining attempts: {remaining}"
 
 async def verify_internal_api_key(x_internal_api_key: str):
+    """
+    Authorize access using the configured internal API key.
+    
+    Raises:
+    	HTTPException: If the expected key is not configured or the provided key does not match.
+    """
     expected = os.getenv("UNLOCK_KEY")
     if not expected or x_internal_api_key != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")

@@ -9,6 +9,12 @@ _redis_client: redis.Redis | None = None
 
 
 def init_activity_dependencies(redis_client: redis.Redis) -> None:
+    """
+    Initialize the Redis client used by Temporal activities.
+    
+    Parameters:
+    	redis_client (redis.Redis): The Redis client instance to store for later use.
+    """
     global _redis_client
     _redis_client = redis_client
 
@@ -16,11 +22,14 @@ def init_activity_dependencies(redis_client: redis.Redis) -> None:
 @activity.defn
 async def lock_account_activity(user_id: int, reason: str = "timeout") -> str:
     """
-    Runs when a user fails MFA — either the 5-minute window expired, or they
-    exhausted their PIN/TOTP attempts early.
-
-    Now actually persists the lock, instead of just printing, so /login's
-    `locked:{user_id}` check reflects reality for the timeout case too.
+    Lock a user account in Redis for a short period.
+    
+    Parameters:
+    	user_id (int): The user to lock.
+    	reason (str): The reason recorded for the lock.
+    
+    Returns:
+    	str: A confirmation message indicating the account was locked.
     """
     if _redis_client is None:
         raise RuntimeError(

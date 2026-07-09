@@ -39,7 +39,16 @@ async def login(
         temporal_client: Client = Depends(get_temporal_client),
 ):
     # 1. Fetch User
-    stmt = select(User).where(User.username == request.username)
+    """
+        Send a verification token for a user's login attempt.
+        
+        Parameters:
+        	request (LoginRequest): Login credentials containing the username.
+        
+        Returns:
+        	dict: A response with the user ID and a message confirming that a verification token was sent.
+        """
+        stmt = select(User).where(User.username == request.username)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
 
@@ -102,7 +111,18 @@ async def verify(
         redis_client: redis.Redis = Depends(get_redis_client),
         temporal_client: Client = Depends(get_temporal_client),
 ):
-    handle = get_workflow_handle(temporal_client, user_id)
+    """
+        Verify an SMS or TOTP authentication code for a user.
+        
+        Parameters:
+        	user_id (int): The user to authenticate.
+        	token (str): The verification code to check.
+        	token_type (Literal["sms", "totp"]): The code type to verify.
+        
+        Returns:
+        	dict: A success response with the authentication message and workflow status, or a warning response if workflow confirmation fails.
+        """
+        handle = get_workflow_handle(temporal_client, user_id)
 
     if token_type == "sms":
         is_valid, message = await auth_service.verify_pin(redis_client, user_id, token)
@@ -145,6 +165,15 @@ async def verify(
 
 @router.get("/qr-code/{username}")
 async def get_qr(username: str, db: AsyncSession = Depends(get_session)):
+    """
+    Generate a QR code image for a user's TOTP enrollment.
+    
+    Raises:
+    	HTTPException: If the user is not found or TOTP is not configured.
+    
+    Returns:
+    	dict: A mapping containing the QR code image as a base64-encoded string.
+    """
     stmt = select(User).where(User.username == username)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
@@ -161,7 +190,16 @@ async def unlock_account(
         redis_client: redis.Redis = Depends(get_redis_client),
         _: None = Depends(auth_service.verify_internal_api_key),
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
+    """
+        Unlock a user's authentication state.
+        
+        Parameters:
+        	user_id (int): The user identifier.
+        
+        Returns:
+        	dict: A message indicating whether the user was unlocked or was not locked.
+        """
+        result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
