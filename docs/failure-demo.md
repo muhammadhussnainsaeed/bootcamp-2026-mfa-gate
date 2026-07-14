@@ -1,4 +1,4 @@
-# Failure Mode Demonstrations: State Management & System Resilience
+# Failure Mode Demonstrations: State Management, Temporal, & System Resilience
 
 ## The Problem Statement
 A core requirement of the bootcamp was to demonstrate the failure mode of storing temporary authentication state in memory. If a login script stores a generated PIN inside a local Python dictionary or list, that data is inherently tied to the application's process lifecycle. 
@@ -6,9 +6,9 @@ A core requirement of the bootcamp was to demonstrate the failure mode of storin
 If the server crashes, restarts, or scales horizontally during a user's 5-minute login window, the in-memory data is completely purged. The user's pending verification disappears, causing a failed login state despite a valid PIN attempt.
 
 ## The Solution
-To build a resilient MFA gateway, temporary state management was decoupled from the application process and offloaded to an external Redis cache. This stateless architectural approach not only protects against process crashes but also enables horizontal scaling and graceful error handling during dependency failures.
+To build a resilient MFA gateway, temporary state management was decoupled from the application process and offloaded to an external Redis cache. The MFA escalation lifecycle is also tracked through Temporal, so authentication can survive process restarts while still handling workflow start and signal failures in a controlled way.
 
-Below are the three demonstrations proving the resilience of this architecture.
+Below are the demonstrations proving the resilience of this architecture.
 
 ---
 
@@ -46,3 +46,21 @@ Offloading state to Redis introduces a new dependency. If Redis fails mid-window
 5. **Simulate Dependency Recovery:** The Redis container is started back up. 
 6. **Verify Resilience:** The user submits the PIN one more time within the original 5-minute TTL. 
 7. **Outcome:** Authentication succeeds, proving the API can survive upstream dependency disruptions without corrupting active sessions.
+
+---
+
+## 4. Workflow Failure Handling (Temporal Outage)
+
+The login and verification flow also depends on Temporal for MFA escalation tracking. If the workflow engine is unavailable, the application should fail safely rather than leaving partial auth state behind.
+
+1. **Trigger Login:** A user initiates a login and the server generates a PIN in Redis.
+2. **Simulate Temporal Failure:** The Temporal service or worker becomes unavailable before the workflow can start.
+3. **Login Safeguard:** The `/auth/login` endpoint aborts the flow, deletes `pin:{user_id}`, `attempts:{user_id}`, and `cooldown:{user_id}`, and returns `503 Service Unavailable`.
+4. **Outcome:** No partial MFA session is left behind, so the user can retry cleanly once Temporal is restored.
+
+Temporal can also fail later during verification signal delivery:
+
+1. **Trigger Verify:** The user submits a valid SMS PIN or TOTP code.
+2. **Simulate Signal Failure:** The workflow handle cannot be signaled because Temporal is unavailable.
+3. **Graceful Handling:** The API accepts the authentication attempt but returns a warning payload indicating cleanup could not be confirmed.
+4. **Outcome:** Authentication is not lost, and the workflow state can be reconciled once Temporal recovers.

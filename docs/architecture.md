@@ -2,31 +2,27 @@
 
 ## Overview
 
-The MFA Gate Server is an asynchronous backend service designed to orchestrate Multi-Factor Authentication. It implements two distinct security models: a stateful SMS-based PIN verification system and a stateless Time-Based One-Time Password (TOTP) system.
-
----
+The MFA Gate Server is an asynchronous backend service for multi-factor authentication. The current design combines SMS PIN verification, TOTP verification, Redis-backed ephemeral state, and a Temporal workflow that tracks escalation and account lockout conditions.
 
 ## Core Technology Stack
 
 | Component | Technology | Purpose |
 | :--- | :--- | :--- |
-| **Framework** | FastAPI | Provides a high-performance, asynchronous REST API infrastructure. |
-| **Database** | PostgreSQL (SQLModel + asyncpg) | Acts as the persistent storage layer for user accounts and permanent TOTP Base32 secrets. |
-| **Cache & State** | Redis (redis.asyncio) | Manages transient state for SMS PINs, handling 5-minute TTL expirations and atomic lockout counters. |
-| **Cryptography** | pyotp | Generates and validates HMAC-SHA1 time-based tokens for the Authenticator app flow. |
-
----
+| Framework | FastAPI | Async REST API and dependency injection. |
+| Database | PostgreSQL (SQLModel + asyncpg) | Stores users and permanent TOTP secrets. |
+| Cache & State | Redis (redis.asyncio) | Stores PINs, retry counters, cooldowns, and lock flags. |
+| Workflow Engine | Temporal | Tracks MFA verification state and escalation lifecycle. |
+| Cryptography | pyotp | Generates and validates TOTP codes. |
 
 ## Endpoint Reference
 
 | Method | Path | Auth Required | Description |
 | :--- | :--- | :---: | :--- |
-| `POST` | `/auth/register` | No | Create a new user account. Generates and stores a TOTP secret. |
-| `POST` | `/auth/login` | No | Look up user and dispatch a 6-digit SMS PIN via Redis. |
-| `POST` | `/auth/verify` | No | Verify an SMS PIN or TOTP code to complete authentication. |
-| `GET` | `/auth/qr-code/{username}` | No | Return a Base64 QR code image for authenticator app enrollment. |
-
----
+| POST | `/auth/register` | No | Create a new user and generate a TOTP secret. |
+| POST | `/auth/login` | No | Look up the user, store a 6-digit PIN in Redis, apply cooldown checks, and start the Temporal watcher. |
+| POST | `/auth/verify` | No | Verify an SMS PIN or TOTP code and signal the Temporal workflow. |
+| GET | `/auth/qr-code/{username}` | No | Return a Base64 QR code image for authenticator enrollment. |
+| POST | `/auth/unlock/{user_id}` | Yes, internal API key | Clear lockout, PIN, and cooldown state for a user. |
 
 ## Authentication Flow Diagram
 
@@ -35,7 +31,7 @@ The MFA Gate Server is an asynchronous backend service designed to orchestrate M
 ```mermaid
 flowchart TD
     R1[Client sends username + phone] --> R2[FastAPI generates TOTP secret via pyotp]
-    R2 --> R3[(PostgreSQL — save user + totp_secret)]
+    R2 --> R3[(PostgreSQL - save user + totp_secret)]
     R3 --> R4[Return 201 + user_id]
 ```
 
@@ -43,97 +39,103 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    L1[Client sends username] --> L2[(PostgreSQL — lookup user by username)]
+    L1[Client sends username] --> L2[(PostgreSQL - lookup user by username)]
     L2 --> L3{User found?}
     L3 -- No --> L4[404 Not Found]
-    L3 -- Yes --> L5[(Redis — store PIN + attempts, TTL 300s)]
-    L5 --> L6[Return user_id to client]
+    L3 -- Yes --> L5{Locked or cooling down?}
+    L5 -- Locked --> L6[403 Locked account]
+    L5 -- Cooling down --> L7[429 Too many requests]
+    L5 -- No --> L8[(Redis - store PIN + attempts, TTL 300s)]
+    L8 --> L9[(Redis - set cooldown key, TTL 60s)]
+    L9 --> L10[Temporal - start MFA watcher]
+    L10 --> L11[Return user_id]
 ```
 
-### POST /auth/verify — SMS
+### POST /auth/verify - SMS
 
 ```mermaid
 flowchart TD
-    S1[Client sends user_id + PIN] --> S2[(Redis — GET pin and attempts)]
-    S2 --> S3{PIN valid?}
-    S3 -- Expired --> S4[400 PIN expired]
-    S3 -- Locked out --> S5[400 Max attempts]
-    S3 -- Wrong --> S6[(Redis — INCR attempts)]
-    S3 -- Correct --> S7[(Redis — DEL pin + attempts)]
-    S7 --> S8[200 Success]
+    S1[Client sends user_id + PIN] --> S2[(Redis - GET pin and attempts)]
+    S2 --> S3{PIN exists?}
+    S3 -- No --> S4[400 PIN expired or never requested]
+    S3 -- Yes --> S5[(Redis - INCR attempts)]
+    S5 --> S6{Attempts > 3?}
+    S6 -- Yes --> S7[400 Max attempts reached]
+    S6 -- No --> S8{PIN matches?}
+    S8 -- No --> S9[400 Invalid PIN]
+    S8 -- Yes --> S10[(Redis - delete PIN + attempts)]
+    S10 --> S11[Temporal - signal verified]
+    S11 --> S12[200 Success]
 ```
 
-### POST /auth/verify — TOTP
+### POST /auth/verify - TOTP
 
 ```mermaid
 flowchart TD
-    T1[Client sends user_id + TOTP code] --> T2[(PostgreSQL — fetch totp_secret)]
+    T1[Client sends user_id + TOTP code] --> T2[(PostgreSQL - fetch totp_secret)]
     T2 --> T3{pyotp validates code?}
     T3 -- No --> T4[400 Invalid TOTP code]
-    T3 -- Yes --> T5[200 Success]
+    T3 -- Yes --> T5[Temporal - signal verified]
+    T5 --> T6[200 Success]
 ```
 
 ### GET /auth/qr-code/{username}
 
 ```mermaid
 flowchart TD
-    Q1[Client requests QR code] --> Q2[(PostgreSQL — fetch totp_secret)]
+    Q1[Client requests QR code] --> Q2[(PostgreSQL - fetch totp_secret)]
     Q2 --> Q3[Build otpauth:// URI]
     Q3 --> Q4[Encode as Base64 PNG]
     Q4 --> Q5[Return qr_image to client]
 ```
 
----
-
 ## Data Storage Model
 
-### PostgreSQL — persistent identity data
+### PostgreSQL - persistent identity data
 
 Stores everything that must survive a server restart.
 
 | Field | Type | Notes |
 | :--- | :--- | :--- |
-| `id` | integer (PK) | Auto-generated, used as the stable identifier across all services. |
-| `username` | string (unique) | Login handle. Unique constraint enforced at DB level. |
-| `phone_number` | string (unique) | Destination for SMS PINs. |
-| `totp_secret` | string | Base32 secret generated at registration. Never changes after creation. |
+| `id` | integer (PK) | Stable identifier for user state and workflow correlation. |
+| `username` | string (unique) | Login handle. |
+| `phone_number` | string (unique) | Destination for SMS-based MFA. |
+| `totp_secret` | string | Base32 secret generated at registration. |
 
-### Redis — transient auth state
+### Redis - ephemeral auth state
 
-All keys are scoped to `user_id` and carry a TTL. Nothing in Redis is permanent.
+All keys are scoped to `user_id` and carry a TTL.
 
 | Key pattern | Value | TTL | Purpose |
 | :--- | :--- | :--- | :--- |
-| `pin:{user_id}` | 6-digit PIN string | 300s | The active SMS PIN for this login attempt. |
-| `attempts:{user_id}` | integer string | 300s | Running count of failed PIN submissions. Lockout triggers at ≥ 3. |
-
-> Both keys are written atomically inside a Redis pipeline transaction and deleted together on successful verification.
-
----
+| `pin:{user_id}` | 6-digit PIN string | 300s | Active SMS PIN for the login attempt. |
+| `attempts:{user_id}` | integer string | 300s | Failed PIN counter with lockout at more than 3 attempts. |
+| `cooldown:{user_id}` | marker value | 60s | Prevents repeated PIN requests during the SMS cooldown window. |
+| `locked:{user_id}` | lock reason | 600s | Marks an account as temporarily locked after escalation. |
 
 ## Key Design Decisions
 
 ### Asynchronous I/O
 
-The entire application stack uses `async`/`await`. By using `asyncpg` for PostgreSQL and `redis.asyncio` for Redis, the server ensures that database queries and cache lookups never block the ASGI event loop, keeping the server responsive under concurrent load.
+The service uses `async`/`await` throughout. PostgreSQL and Redis access stay non-blocking, so API traffic does not stall the ASGI event loop.
 
 ### Separation of state by lifetime
 
 | | SMS (stateful) | TOTP (stateless) |
 | :--- | :--- | :--- |
-| **Storage** | Redis (ephemeral) | PostgreSQL (permanent) |
-| **Expiry** | 5-minute TTL | 30-second time window (mathematical) |
-| **Verification** | String comparison against stored PIN | `pyotp.TOTP.verify()` against current epoch |
-| **Cleanup needed?** | Yes — keys deleted on success | No — nothing was written |
-
-SMS PINs must exist for exactly 5 minutes. This state is offloaded to Redis rather than in-memory Python structures to guarantee process resilience across restarts. TOTP codes require no temporary storage — the server mathematically verifies the token using the permanent user secret and the current epoch time.
+| Storage | Redis (ephemeral) | PostgreSQL (permanent secret) |
+| Expiry | 5-minute PIN TTL plus 60-second cooldown | 30-second moving time window |
+| Verification | String comparison against stored PIN | `pyotp.TOTP.verify()` |
+| Cleanup needed? | Yes, on success or unlock | No temporary state stored |
 
 ### Security behaviours worth noting
 
-- **PIN lockout is pre-check, not post-check.** The attempt counter is read *before* the PIN is compared, so a locked-out user cannot even attempt a guess.
-- **Atomic pipeline writes on login.** `pin:{user_id}` and `attempts:{user_id}` are written in a single Redis pipeline with `MULTI/EXEC`, eliminating partial-write race conditions.
-- **Timing note.** Returning `404` for unknown usernames during login leaks whether an account exists. Consider returning `200` with a dummy delay for production hardening.
+- PIN generation uses a cryptographically secure random 6-digit value.
+- PIN writes and attempt resets are performed atomically in a Redis pipeline.
+- Login requests are rate-limited by a cooldown key to reduce repeated SMS requests.
+- A Temporal workflow tracks verification progress and supports escalation and lockout handling.
+- The unlock endpoint is protected by an internal API key dependency.
 
 ### Infrastructure-agnostic testing
 
-The Pytest suite uses FastAPI's dependency injection to swap production PostgreSQL and Redis clients with `aiosqlite` and `fakeredis`. This allows the CI/CD pipeline to execute hundreds of isolated tests in milliseconds without Docker container overhead.
+The Pytest suite overrides PostgreSQL, Redis, and Temporal dependencies with in-memory fakes. This keeps the auth flow testable without requiring external services during CI.
