@@ -98,54 +98,70 @@ async def login(
 
 
 @router.post("/verify")
-async def verify(user_data: VerifyRequest,
-        token_type: Literal["sms", "totp"] = "sms",
+async def verify(
+        user_data: VerifyRequest,
         db: AsyncSession = Depends(get_session),
         redis_client: redis.Redis = Depends(get_redis_client),
         temporal_client: Client = Depends(get_temporal_client),
 ):
     handle = get_workflow_handle(temporal_client, user_data.user_id)
 
-    if token_type == "sms":
-        is_valid, message = await auth_service.verify_pin(redis_client, user_data.user_id, user_data.token)
+    # 0. NEW: Pre-flight Check for SMS
+    # Ensure they actually have an active SMS session before counting an attempt
+    if user_data.token_type == "sms":
+        pin_exists = await redis_client.exists(f"pin:{user_data.user_id}")
+        if not pin_exists:
+            raise HTTPException(status_code=400, detail="PIN expired or never requested.")
+
+    # 1. The Gatekeeper: Track attempts for BOTH SMS and TOTP universally
+    is_locked, remaining = await auth_service.track_verification_attempt(redis_client, user_data.user_id)
+
+    if is_locked:
+        # Immediate lock in Redis
+        await redis_client.setex(f"locked:{user_data.user_id}", 600, "max_attempts")
+
+        # Signal Temporal to escalate to the timeout activity
+        try:
+            await handle.signal(MFAEscalationWatcher.mark_as_failed)
+        except Exception as e:
+            print(f"Warning: Could not signal failure to Temporal. {e}")
+
+        raise HTTPException(status_code=400, detail="Max attempts reached. Account locked.")
+
+
+    # 2. Token Type Validation
+    if user_data.token_type == "sms":
+        is_valid = await auth_service.validate_sms_pin(redis_client, user_data.user_id, user_data.token)
         if not is_valid:
-            if "Service temporarily unavailable" in message:
-                raise HTTPException(status_code=503, detail=message)
-            if "Max attempts reached" in message:
-                try:
-                    await handle.signal(MFAEscalationWatcher.mark_as_failed)
-                except Exception as e:
-                    print(f"Warning: Could not signal failure to Temporal. {e}")
+            raise HTTPException(status_code=400, detail=f"Invalid PIN. Remaining attempts: {remaining+1}")
 
-                # Immediate lock — don't wait on the activity round trip.
-                await redis_client.setex(f"locked:{user_data.user_id}", 600, "max_attempts")
-                raise HTTPException(status_code=400, detail=message)
-
-            raise HTTPException(status_code=400, detail=message)
-
-    elif token_type == "totp":
+    elif user_data.token_type == "totp":
         user = await db.execute(select(User).where(User.id == user_data.user_id))
         user_obj = user.scalar_one_or_none()
 
         if not user_obj or not totp_service.verify_totp_code(user_obj.totp_secret, user_data.token):
-            raise HTTPException(status_code=400, detail="Invalid TOTP code")
+            raise HTTPException(status_code=400, detail=f"Invalid TOTP code. Remaining attempts: {remaining}")
 
+    else:
+        raise HTTPException(status_code=400, detail="Invalid token type requested.")
+
+
+    # 3. Success Cleanup & Temporal Signal
     try:
         await handle.signal(MFAEscalationWatcher.mark_as_verified)
     except Exception as e:
         print(f"CRITICAL: Could not signal Temporal workflow for user {user_data.user_id}. {e}")
         return {
-            "message": f"Authentication via {token_type} accepted, but could not confirm "
+            "message": f"Authentication via {user_data.token_type} accepted, but could not confirm "
                        f"workflow cleanup — treat as unverified until confirmed.",
             "status": "warning",
         }
 
     reason = await get_workflow_reason(handle)
     return {
-        "message": f"Authentication via {token_type} successful",
-        "workflow_status": reason,  # e.g. "verified"
+        "message": f"Authentication via {user_data.token_type} successful",
+        "workflow_status": reason,
     }
-
 
 @router.get("/qr-code/{username}")
 async def get_qr(username: str, db: AsyncSession = Depends(get_session)):

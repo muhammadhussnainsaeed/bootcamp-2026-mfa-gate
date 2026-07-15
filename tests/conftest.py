@@ -105,4 +105,5 @@ async def client(db_session, redis_client):
         yield c
 
     app.dependency_overrides.clear()
-    app.state._state.pop("temporal_client", None)
+    if hasattr(app.state, "my_mocked_dependency"):
+        delattr(app.state, "my_mocked_dependency")

@@ -6,3 +6,4 @@ class LoginRequest(BaseModel):
 class VerifyRequest(BaseModel):
     user_id: int
     token: str
+    token_type : str

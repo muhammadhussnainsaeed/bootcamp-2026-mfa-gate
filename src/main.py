@@ -1,3 +1,5 @@
+import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from temporalio.client import Client
@@ -17,6 +19,12 @@ async def lifespan(app: FastAPI):
     yield
     print("🛑 [SHUTDOWN] Cleaning application network pools cleanly...")
 
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
+
+# Set level to DEBUG locally, but INFO in production
+LOG_LEVEL = logging.DEBUG if ENVIRONMENT == "development" else logging.INFO
+
+logging.basicConfig(level=LOG_LEVEL)
 
 app = FastAPI(title="Bootcamp 2026: MFA Gate", lifespan=lifespan)
 app.include_router(auth.router)
