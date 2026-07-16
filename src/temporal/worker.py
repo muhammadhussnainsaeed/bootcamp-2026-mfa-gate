@@ -13,7 +13,7 @@ load_dotenv()
 
 async def main():
 
-    TEMPORAL_HOST = os.getenv("localhost:7233")
+    TEMPORAL_HOST = os.getenv("TEMPORAL_HOST")
 
     client = await Client.connect(TEMPORAL_HOST)
 
