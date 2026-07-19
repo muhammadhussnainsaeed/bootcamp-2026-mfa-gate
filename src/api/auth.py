@@ -1,7 +1,4 @@
-import asyncio
-from typing import Literal
-
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status
 import redis.asyncio as redis
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,7 +61,7 @@ async def login(
     if cooldown:
         ttl = await redis_client.ttl(f"cooldown:{user.id}")
         raise HTTPException(
-            status_code=429, # 429 Too Many Requests
+            status_code=429,
             detail=f"Please wait {ttl} seconds before requesting a new PIN."
         )
 
@@ -73,7 +70,7 @@ async def login(
     if not ok:
         raise HTTPException(status_code=503, detail=result_msg)
 
-    # 5. NEW: Set the Cooldown Timer (60 seconds)
+    # 5. Set the Cooldown Timer (60 seconds)
     # This ensures they cannot hit this API again for exactly 1 minute.
     await redis_client.setex(f"cooldown:{user.id}", 60, "1")
 

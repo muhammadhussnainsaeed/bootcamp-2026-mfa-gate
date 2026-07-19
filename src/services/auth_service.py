@@ -30,9 +30,8 @@ async def generate_and_store_pin(redis_client: redis.Redis, user_id: int) -> tup
     except RedisError:
         return False, "Service temporarily unavailable. Please try again shortly."
 
-    # Pass the {pin} variable into the debug string!
+
     logger.debug(f"DEVELOPMENT ONLY - PIN for userID({user_id}): {pin}")
-    logger.info(f"Successfully generated PIN for user {user_id}")
     return True, pin
 
 
